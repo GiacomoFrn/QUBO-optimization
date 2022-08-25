@@ -95,9 +95,9 @@ def qubo_from_constraint(constraint, option, coeff, encoding):
         qubo = []    
         for i in idx:
             rank = len(i[1])
-            coeff = coeff*i[0]
+            coeff_ = coeff*i[0]
             indexes = i[1]
-            qubo.append(list([rank, coeff, indexes]))
+            qubo.append(list([rank, coeff_, indexes]))
     
     return qubo
     
