@@ -102,7 +102,7 @@ def qubo_from_constraint(constraint, option, coeff, encoding):
     return qubo
     
 
-def qubo_from_data(photo_req_df, constraints_df, encoding):
+def qubo_from_data(photo_req_df, constraints_df, encoding, penalty_coeff=1.1):
     # create empty qubo dataframe
     qubo_df = pd.DataFrame({'rank':    pd.Series(dtype='int'),
                             'coeff':   pd.Series(dtype='int'),
@@ -120,7 +120,7 @@ def qubo_from_data(photo_req_df, constraints_df, encoding):
                 k = k + 1
 
     # penalties coefficient
-    m = -1.1*min(qubo_df['coeff'])                                                                           
+    m = -penalty_coeff*min(qubo_df['coeff'])                                                                           
 
     if encoding=="standard":
         # add penalties to avoid taking the same photo multiple times with different cameras
