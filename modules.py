@@ -243,6 +243,10 @@ def process_qubo_df(qubo_df):
     qubo_df_ = qubo_df_.drop(['indexes', 'keys'], axis=1)
     qubo_df_ ['variables'] = qubo_df_ ['variables'].apply(lambda x: np.array(x))
 
+    # drop 0 coeff rows with eps 0.1
+    qubo_df_.drop(qubo_df_.index[np.abs(qubo_df_.coeff)<0.1], inplace=True)
+    qubo_df_.reset_index(drop=True, inplace=True)
+
     return qubo_df_, key_to_qubo_dict
 
 ########################################################################################################################
@@ -401,6 +405,129 @@ def reduce_higher_order_terms(qubo_df_, key_to_qubo_dict, method='boros'):
         
         # drop hash column
         qubo_df_.drop(['gb_variables'], axis=1, inplace=True)
+
+    if method=='mix':
+
+        # qubo to key dictionary
+        qubo_to_key_dict = {v: k for k, v in key_to_qubo_dict.items()}
+        
+        m = len(key_to_qubo_dict)
+
+        # select higher order terms
+        ho_terms = qubo_df_[qubo_df_['rank']>2]
+        #print(len(ho_terms), "higher order terms found")
+
+        # set M = 1 + sum(|c_i|)
+        M = sum(abs(qubo_df_['coeff']))+1
+
+        # reduce higher order terms
+        while len(ho_terms)>0:#ho_terms.index:
+            i = ho_terms.index[0]
+            #print("higher order term to be reduced\n", list(qubo_df_.iloc[i]))
+            # coefficient of the higher order term
+            a = qubo_df_.loc[i, 'coeff']
+            # order of the higher order term
+            d = qubo_df_.loc[i, 'rank']
+
+            #print("new term, last variable", list(key_to_qubo_dict.values())[-1])
+            # distinguish a<0 and a>0
+
+            if a<0: # use ishikawa
+
+                #print("using ishikawa")
+
+                # list for new terms
+                qubo = []
+                # create new ancillary variable
+                #print("new variable", m)
+                key_to_qubo_dict[f'{m}_ho_term'] = m
+                # qubo to key dictionary
+                qubo_to_key_dict = {v: k for k, v in key_to_qubo_dict.items()}
+                # append new terms
+                for var in qubo_df_.loc[i, 'variables']:
+                    qubo.append(list([2, a, np.array([m, var])]))
+                qubo.append(list([1, -(d-1)*a, np.array([m])]))
+                # delete ho_term
+                qubo_df_.drop(i, inplace=True)
+                # update m
+                m = m + 1
+
+                # add new terms to qubo_df_
+                qubo_df_.reset_index(drop=True, inplace=True)
+                l = len(qubo_df_)
+                for i in range(len(qubo)):
+                    qubo_df_.loc[i+l] = qubo[i]
+
+                # group by operation needs string object
+                qubo_df_['gb_variables'] = qubo_df_['variables'].apply(preprocess_variables, join=True)
+                # gruop by qubo_df_ by gb_variables summing coefficients
+                qubo_df_ = qubo_df_.groupby(['gb_variables'], as_index=False, sort=False).agg({'rank':'first', 'coeff': 'sum', 'variables':'first'})
+                qubo_df_.drop(['gb_variables'], axis=1, inplace=True)
+                
+            if a>0: # use boros
+
+                #print("using boros")
+
+                ho_term = np.array(qubo_df_.loc[i, 'variables'])
+
+                old_m = m
+                
+                for j in range(d-2):
+                    # list for new terms
+                    qubo = []
+                    # sort to better handle picking pairs
+                    ho_term.sort()
+                    # choose two elements from it 
+                    ho_pair = ho_term[:2]
+                    ho_term = np.delete(ho_term, [0,1])
+
+                    # select terms with the two elements
+                    mask = [all(x in var for x in ho_pair) for var in qubo_df_['variables']]
+                    ho_df = qubo_df_[mask]
+
+                    # update key_to_qubo_dict with the new variable
+                    #print("new variable", m)
+                    key_to_qubo_dict['_'.join([qubo_to_key_dict[v] for v in ho_pair])] = m
+                    # qubo to key dictionary
+                    qubo_to_key_dict = {v: k for k, v in key_to_qubo_dict.items()}
+                    # update ho_term with the new variable
+                    ho_term = np.append(ho_term, m)
+
+                    # update ho_pair term
+                    pair_idx = ho_df.index[ho_df['rank']==2].to_list()
+                    if len(pair_idx)!=0:
+                        qubo.append(list([2, qubo_df_.loc[pair_idx[0], 'coeff'] + M, np.array([v for v in ho_pair])]))
+                        qubo_df_.drop(pair_idx[0], inplace=True)
+                        ho_df = ho_df.drop(pair_idx[0])
+                    else:
+                        qubo.append(list([2, M, np.array([v for v in ho_pair])]))
+
+                    # create terms [ho_pair[0], m; ho_pair[1], m]
+                    qubo.append(list([2, -2*M, np.array([ho_pair[0], m])]))
+                    qubo.append(list([2, -2*M, np.array([ho_pair[1], m])]))
+
+                    # create term m
+                    qubo.append(list([1, 3*M, np.array([m])]))
+
+                    # change variables where ho_pair appear to m
+                    for indexes in ho_df.index:
+                        mask_ = np.array([var not in ho_pair for var in qubo_df_.loc[indexes, 'variables']])
+                        var = np.append(qubo_df_.loc[indexes, "variables"][mask_],[m])
+                        qubo.append(list([len(var), qubo_df_.loc[indexes, 'coeff'], var]))
+                        qubo_df_.drop(indexes, inplace=True)
+
+                    # update m
+                    m = m + 1
+
+                    # add new terms to qubo_df_
+                    qubo_df_.reset_index(drop=True, inplace=True)
+                    l = len(qubo_df_)
+                    for i in range(len(qubo)):
+                        qubo_df_.loc[i+l] = qubo[i]
+
+                #print(f'{m-old_m} new variables created')
+
+            ho_terms = qubo_df_[qubo_df_['rank']>2] 
 
     return qubo_df_, key_to_qubo_dict
 
